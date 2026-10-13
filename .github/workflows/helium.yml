@@ -1,0 +1,75 @@
+name: Helium Browser Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download Helium (portable zip)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rel = gh api repos/imputnet/helium-windows/releases/latest | ConvertFrom-Json
+          $asset = $rel.assets | Where-Object { $_.name -match 'x64.*\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Host "Zip asset পাওয়া যায়নি। Available assets:"
+            $rel.assets | ForEach-Object { $_.name }
+            exit 1
+          }
+          Invoke-WebRequest $asset.browser_download_url -OutFile helium.zip
+          Expand-Archive helium.zip -DestinationPath helium
+          $exe = Get-ChildItem helium -Recurse -Include helium.exe,chrome.exe | Select-Object -First 1
+          "HELIUM_EXE=$($exe.FullName)" | Out-File -Append -FilePath $env:GITHUB_ENV
+          Write-Host "Found: $($exe.FullName)"
+
+      - name: Install ffmpeg
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Record screen and run test
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          $wsh = New-Object -ComObject WScript.Shell
+
+          # 1) Screen recording শুরু (৫০ সেকেন্ড পর নিজে থেকে থামবে)
+          $ff = Start-Process ffmpeg -PassThru -WindowStyle Hidden -ArgumentList `
+            "-y -f gdigrab -framerate 10 -draw_mouse 1 -i desktop -t 50 -c:v libx264 -preset ultrafast -pix_fmt yuv420p recording.mp4"
+          Start-Sleep 3
+
+          # 2) Task Manager খোলা
+          Start-Process taskmgr
+          Start-Sleep 5
+
+          # 3) Helium চালু + website browse
+          $dir = Join-Path $env:RUNNER_TEMP "helium-profile"
+          Start-Process $env:HELIUM_EXE -ArgumentList "--user-data-dir=`"$dir`" --no-first-run --no-default-browser-check https://example.com"
+          Start-Sleep 10
+
+          # 4) helium://dino খোলা (Ctrl+L দিয়ে address bar)
+          $wsh.AppActivate("Example Domain") | Out-Null
+          Start-Sleep 1
+          [System.Windows.Forms.SendKeys]::SendWait("^l")
+          Start-Sleep 1
+          [System.Windows.Forms.SendKeys]::SendWait("helium://dino{ENTER}")
+          Start-Sleep 5
+
+          # 5) Dino game খেলা: space দিয়ে শুরু, তারপর কয়েকবার jump
+          [System.Windows.Forms.SendKeys]::SendWait(" ")
+          1..8 | ForEach-Object {
+            Start-Sleep 2
+            [System.Windows.Forms.SendKeys]::SendWait(" ")
+          }
+
+          $ff.WaitForExit()
+
+      - name: Upload recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helium-screen-recording
+          path: recording.mp4
