@@ -19,7 +19,22 @@ jobs:
           $outDir = Join-Path (Get-Location) "icons"
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-          $refAsm = if ($PSVersionTable.PSVersion.Major -le 5) { 'System.Drawing' } else { 'System.Drawing.Common' }
+          # .NET 10 e System.Drawing.Common er type gulo System.Private.Windows.GdiPlus e thake, tai oigulo-o reference dite hobe
+          if ($PSVersionTable.PSVersion.Major -le 5) {
+              $refAsm = @('System.Drawing')
+          } else {
+              $dirs = @($PSHOME, [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory())
+              $refAsm = @()
+              foreach ($n in 'System.Drawing.Common','System.Drawing.Primitives','System.Private.Windows.GdiPlus','System.Private.Windows.Core') {
+                  $found = $null
+                  foreach ($d in $dirs) {
+                      $c = Join-Path $d "$n.dll"
+                      if (Test-Path $c) { $found = $c; break }
+                  }
+                  $refAsm += $(if ($found) { $found } else { $n })
+              }
+          }
+          Write-Host "References: $($refAsm -join ', ')"
 
           Add-Type -ReferencedAssemblies $refAsm -TypeDefinition @"
           using System;
