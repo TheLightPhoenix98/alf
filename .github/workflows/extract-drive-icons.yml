@@ -13,23 +13,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract drive icons
+      - name: Extract drive icons (multi-size .ico)
         shell: pwsh
         run: |
           $outDir = Join-Path (Get-Location) "icons"
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-          # PowerShell 7+ এর জন্য System.Drawing.Common ব্যবহার করতে হবে
           $refAsm = if ($PSVersionTable.PSVersion.Major -le 5) { 'System.Drawing' } else { 'System.Drawing.Common' }
 
           Add-Type -ReferencedAssemblies $refAsm -TypeDefinition @"
           using System;
+          using System.Collections.Generic;
           using System.Drawing;
+          using System.IO;
           using System.Runtime.InteropServices;
 
-          public static class StockIcon {
+          public static class IconTool {
               [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-              public struct SHSTOCKICONINFO {
+              struct SHSTOCKICONINFO {
                   public uint cbSize;
                   public IntPtr hIcon;
                   public int iSysImageIndex;
@@ -38,53 +39,108 @@ jobs:
                   public string szPath;
               }
 
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              struct SHFILEINFO {
+                  public IntPtr hIcon;
+                  public int iIcon;
+                  public uint dwAttributes;
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+                  public string szDisplayName;
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+                  public string szTypeName;
+              }
+
               [DllImport("shell32.dll", SetLastError = true)]
-              public static extern int SHGetStockIconInfo(uint siid, uint uFlags, ref SHSTOCKICONINFO psii);
+              static extern int SHGetStockIconInfo(uint siid, uint uFlags, ref SHSTOCKICONINFO psii);
+
+              [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+              static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+              static extern uint PrivateExtractIcons(string szFileName, int nIconIndex, int cxIcon, int cyIcon, IntPtr[] phicon, uint[] piconid, uint nIcons, uint flags);
 
               [DllImport("user32.dll", SetLastError = true)]
-              public static extern bool DestroyIcon(IntPtr hIcon);
+              static extern bool DestroyIcon(IntPtr hIcon);
 
-              public const uint SHGSI_ICON       = 0x000000100;
-              public const uint SHGSI_LARGEICON  = 0x000000000;
-              public const uint SHGSI_SMALLICON  = 0x000000001;
+              const uint SHGSI_ICONLOCATION = 0x1000;
+              const uint SHGFI_ICONLOCATION = 0x1000;
 
-              public const uint SIID_DRIVEFIXED   = 8;   // Normal HDD / C: style
-              public const uint SIID_DRIVEREMOVE  = 7;   // Removable / USB
-              public const uint SIID_DRIVECD      = 11;  // Optical
-              public const uint SIID_DRIVENET     = 9;   // Network
+              static readonly int[] Sizes = new int[] { 16, 24, 32, 48, 64, 128, 256 };
 
-              public static Icon Get(uint siid, bool large = true) {
+              // Real drive path (e.g. "C:\") -> actual icon the shell shows (C: has the Windows logo)
+              public static string ExportFromPath(string drivePath, string outFile) {
+                  var fi = new SHFILEINFO();
+                  SHGetFileInfo(drivePath, 0, ref fi, (uint)Marshal.SizeOf(fi), SHGFI_ICONLOCATION);
+                  return Build(Environment.ExpandEnvironmentVariables(fi.szDisplayName), fi.iIcon, outFile);
+              }
+
+              // Stock icon id (8 = normal fixed drive, no Windows logo)
+              public static string ExportStock(uint siid, string outFile) {
                   var info = new SHSTOCKICONINFO();
                   info.cbSize = (uint)Marshal.SizeOf(info);
-                  uint flags = SHGSI_ICON | (large ? SHGSI_LARGEICON : SHGSI_SMALLICON);
-                  int hr = SHGetStockIconInfo(siid, flags, ref info);
+                  int hr = SHGetStockIconInfo(siid, SHGSI_ICONLOCATION, ref info);
                   if (hr != 0) throw new Exception("SHGetStockIconInfo failed: " + hr);
+                  return Build(Environment.ExpandEnvironmentVariables(info.szPath), info.iIcon, outFile);
+              }
 
-                  Icon icon = (Icon)Icon.FromHandle(info.hIcon).Clone();
-                  DestroyIcon(info.hIcon);
-                  return icon;
+              static string Build(string file, int index, string outFile) {
+                  var pngs = new List<byte[]>();
+                  var dims = new List<int>();
+                  foreach (int s in Sizes) {
+                      IntPtr[] h = new IntPtr[1];
+                      uint[] id = new uint[1];
+                      uint n = PrivateExtractIcons(file, index, s, s, h, id, 1, 0);
+                      if (n == 0 || n == 0xFFFFFFFF || h[0] == IntPtr.Zero) continue;
+                      try {
+                          using (Icon ic = Icon.FromHandle(h[0]))
+                          using (Bitmap bmp = ic.ToBitmap())
+                          using (Bitmap sized = new Bitmap(bmp, new Size(s, s)))
+                          using (MemoryStream ms = new MemoryStream()) {
+                              sized.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                              pngs.Add(ms.ToArray());
+                              dims.Add(s);
+                          }
+                      } finally { DestroyIcon(h[0]); }
+                  }
+                  if (pngs.Count == 0) throw new Exception("No icon extracted from " + file + " #" + index);
+
+                  using (var fs = new FileStream(outFile, FileMode.Create))
+                  using (var bw = new BinaryWriter(fs)) {
+                      bw.Write((ushort)0);
+                      bw.Write((ushort)1);
+                      bw.Write((ushort)pngs.Count);
+                      int offset = 6 + 16 * pngs.Count;
+                      for (int i = 0; i < pngs.Count; i++) {
+                          byte d = dims[i] >= 256 ? (byte)0 : (byte)dims[i];
+                          bw.Write(d);
+                          bw.Write(d);
+                          bw.Write((byte)0);
+                          bw.Write((byte)0);
+                          bw.Write((ushort)1);
+                          bw.Write((ushort)32);
+                          bw.Write((uint)pngs[i].Length);
+                          bw.Write((uint)offset);
+                          offset += pngs[i].Length;
+                      }
+                      foreach (var p in pngs) bw.Write(p);
+                  }
+                  return file + " #" + index + " -> " + pngs.Count + " sizes (" + string.Join(",", dims) + ")";
               }
           }
           "@
 
-          # Icon.Save() এর জন্য Stream লাগে, string path নয়
-          function Save-Icon($icon, $path) {
-              $fs = [System.IO.File]::Create($path)
-              try { $icon.Save($fs) } finally { $fs.Dispose() }
-              Write-Host "Saved: $path"
-          }
+          # C: drive, Windows logo wala icon
+          Write-Host (Join-Path $outDir "drive-system-c.ico")
+          Write-Host ([IconTool]::ExportFromPath("C:\", (Join-Path $outDir "drive-system-c.ico")))
 
-          # Normal Fixed Drive (C: / HDD)
-          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVEFIXED, $true)) (Join-Path $outDir "drive-fixed.ico")
-
-          # Removable / USB style
-          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVEREMOVE, $true)) (Join-Path $outDir "drive-removable.ico")
+          # Normal drive icon (logo chhara)
+          Write-Host ([IconTool]::ExportStock(8, (Join-Path $outDir "drive-normal.ico")))
 
           # Extra
-          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVECD, $true)) (Join-Path $outDir "drive-cd.ico")
-          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVENET, $true)) (Join-Path $outDir "drive-network.ico")
+          Write-Host ([IconTool]::ExportStock(7,  (Join-Path $outDir "drive-removable.ico")))
+          Write-Host ([IconTool]::ExportStock(11, (Join-Path $outDir "drive-cd.ico")))
+          Write-Host ([IconTool]::ExportStock(9,  (Join-Path $outDir "drive-network.ico")))
 
-          Write-Host "`nAll icons extracted to $outDir"
           Get-ChildItem $outDir | Format-Table Name, Length
 
       - name: Commit & Push
