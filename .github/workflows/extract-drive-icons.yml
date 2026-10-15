@@ -23,7 +23,6 @@ jobs:
 
           Add-Type -ReferencedAssemblies $refAsm -TypeDefinition @"
           using System;
-          using System.Collections.Generic;
           using System.Drawing;
           using System.IO;
           using System.Runtime.InteropServices;
@@ -84,8 +83,9 @@ jobs:
               }
 
               static string Build(string file, int index, string outFile) {
-                  var pngs = new List<byte[]>();
-                  var dims = new List<int>();
+                  byte[][] pngs = new byte[Sizes.Length][];
+                  int[] dims = new int[Sizes.Length];
+                  int count = 0;
                   foreach (int s in Sizes) {
                       IntPtr[] h = new IntPtr[1];
                       uint[] id = new uint[1];
@@ -97,20 +97,21 @@ jobs:
                           using (Bitmap sized = new Bitmap(bmp, new Size(s, s)))
                           using (MemoryStream ms = new MemoryStream()) {
                               sized.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                              pngs.Add(ms.ToArray());
-                              dims.Add(s);
+                              pngs[count] = ms.ToArray();
+                              dims[count] = s;
+                              count++;
                           }
                       } finally { DestroyIcon(h[0]); }
                   }
-                  if (pngs.Count == 0) throw new Exception("No icon extracted from " + file + " #" + index);
+                  if (count == 0) throw new Exception("No icon extracted from " + file + " #" + index);
 
                   using (var fs = new FileStream(outFile, FileMode.Create))
                   using (var bw = new BinaryWriter(fs)) {
                       bw.Write((ushort)0);
                       bw.Write((ushort)1);
-                      bw.Write((ushort)pngs.Count);
-                      int offset = 6 + 16 * pngs.Count;
-                      for (int i = 0; i < pngs.Count; i++) {
+                      bw.Write((ushort)count);
+                      int offset = 6 + 16 * count;
+                      for (int i = 0; i < count; i++) {
                           byte d = dims[i] >= 256 ? (byte)0 : (byte)dims[i];
                           bw.Write(d);
                           bw.Write(d);
@@ -122,9 +123,11 @@ jobs:
                           bw.Write((uint)offset);
                           offset += pngs[i].Length;
                       }
-                      foreach (var p in pngs) bw.Write(p);
+                      for (int i = 0; i < count; i++) bw.Write(pngs[i]);
                   }
-                  return file + " #" + index + " -> " + pngs.Count + " sizes (" + string.Join(",", dims) + ")";
+                  string list = "";
+                  for (int i = 0; i < count; i++) list += (i > 0 ? "," : "") + dims[i];
+                  return file + " #" + index + " -> " + count + " sizes (" + list + ")";
               }
           }
           "@
