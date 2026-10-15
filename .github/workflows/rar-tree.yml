@@ -12,7 +12,9 @@ jobs:
       - name: Download
         run: |
           pip install gdown
-          gdown --fuzzy "https://drive.google.com/file/d/1_qYPgoYbkdBE-B1SfW8orgUXGDz0Otuv/view?usp=drivesdk" -O file.rar
+          gdown "1_qYPgoYbkdBE-B1SfW8orgUXGDz0Otuv" -O file.rar
+
+
 
       - name: Tree (extract ছাড়া)
         run: 7z l file.rar
