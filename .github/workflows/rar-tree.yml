@@ -20,3 +20,7 @@ jobs:
         run: 7z l file.rar
 
      
+      - name: ISO এর ভেতরের তালিকা
+        run: |
+          7z x file.rar -oout -y
+          7z l "out\Grand Theft Auto - San Andreas PC\GTA San Andreas PC.iso"
