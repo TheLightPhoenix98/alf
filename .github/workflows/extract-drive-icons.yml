@@ -1,0 +1,96 @@
+name: Extract Windows Drive Icons
+
+on:
+  workflow_dispatch:          # ম্যানুয়ালি চালাবে
+  # schedule:
+  #   - cron: '0 0 1 * *'   # চাইলে মাসে একবার
+
+permissions:
+  contents: write             # কমিট করার জন্য দরকার
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract drive icons
+        shell: pwsh
+        run: |
+          $outDir = "icons"
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+          Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+          using System;
+          using System.Drawing;
+          using System.Runtime.InteropServices;
+
+          public static class StockIcon {
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              public struct SHSTOCKICONINFO {
+                  public uint cbSize;
+                  public IntPtr hIcon;
+                  public int iSysImageIndex;
+                  public int iIcon;
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+                  public string szPath;
+              }
+
+              [DllImport("shell32.dll", SetLastError = true)]
+              public static extern int SHGetStockIconInfo(uint siid, uint uFlags, ref SHSTOCKICONINFO psii);
+
+              [DllImport("user32.dll", SetLastError = true)]
+              public static extern bool DestroyIcon(IntPtr hIcon);
+
+              public const uint SHGSI_ICON       = 0x000000100;
+              public const uint SHGSI_LARGEICON  = 0x000000000;
+              public const uint SHGSI_SMALLICON  = 0x000000001;
+
+              // Official stock IDs
+              public const uint SIID_DRIVEFIXED   = 8;   // Normal HDD / C: style
+              public const uint SIID_DRIVEREMOVE  = 7;   // Removable / USB
+              public const uint SIID_DRIVECD      = 11;  // Optical
+              public const uint SIID_DRIVENET     = 9;   // Network
+
+              public static Icon Get(uint siid, bool large = true) {
+                  var info = new SHSTOCKICONINFO();
+                  info.cbSize = (uint)Marshal.SizeOf(info);
+                  uint flags = SHGSI_ICON | (large ? SHGSI_LARGEICON : SHGSI_SMALLICON);
+                  int hr = SHGetStockIconInfo(siid, flags, ref info);
+                  if (hr != 0) throw new Exception("SHGetStockIconInfo failed: " + hr);
+
+                  Icon icon = (Icon)Icon.FromHandle(info.hIcon).Clone();
+                  DestroyIcon(info.hIcon);
+                  return icon;
+              }
+          }
+          "@
+
+          # ---- Normal Fixed Drive (C: / HDD) ----
+          $fixed = [StockIcon]::Get([StockIcon]::SIID_DRIVEFIXED, $true)
+          $fixed.Save("$outDir\drive-fixed.ico")
+          Write-Host "Saved: drive-fixed.ico"
+
+          # ---- Removable / USB style ----
+          $removable = [StockIcon]::Get([StockIcon]::SIID_DRIVEREMOVE, $true)
+          $removable.Save("$outDir\drive-removable.ico")
+          Write-Host "Saved: drive-removable.ico"
+
+          # ---- Extra useful ones (optional) ----
+          $cd = [StockIcon]::Get([StockIcon]::SIID_DRIVECD, $true)
+          $cd.Save("$outDir\drive-cd.ico")
+
+          $net = [StockIcon]::Get([StockIcon]::SIID_DRIVENET, $true)
+          $net.Save("$outDir\drive-network.ico")
+
+          Write-Host "`nAll icons extracted to $outDir\"
+          Get-ChildItem $outDir | Format-Table Name, Length
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add icons/
+          git diff --staged --quiet || git commit -m "Add Windows drive icons from windows-latest"
+          git push
