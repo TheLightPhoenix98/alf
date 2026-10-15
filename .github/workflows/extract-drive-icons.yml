@@ -76,7 +76,8 @@ jobs:
               [DllImport("user32.dll", SetLastError = true)]
               static extern bool DestroyIcon(IntPtr hIcon);
 
-              const uint SHGSI_ICONLOCATION = 0x1000;
+              // FIX: SHGSI_ICONLOCATION is 0 (0x1000 is invalid -> E_INVALIDARG)
+              const uint SHGSI_ICONLOCATION = 0;
               const uint SHGFI_ICONLOCATION = 0x1000;
 
               static readonly int[] Sizes = new int[] { 16, 24, 32, 48, 64, 128, 256 };
@@ -147,17 +148,20 @@ jobs:
           }
           "@
 
+          function Try-Stock($id, $name) {
+              try { Write-Host ([IconTool]::ExportStock($id, (Join-Path $outDir $name))) }
+              catch { Write-Warning "$name failed: $_" }
+          }
+
           # C: drive, Windows logo wala icon
           Write-Host (Join-Path $outDir "drive-system-c.ico")
           Write-Host ([IconTool]::ExportFromPath("C:\", (Join-Path $outDir "drive-system-c.ico")))
 
-          # Normal drive icon (logo chhara)
-          Write-Host ([IconTool]::ExportStock(8, (Join-Path $outDir "drive-normal.ico")))
-
-          # Extra
-          Write-Host ([IconTool]::ExportStock(7,  (Join-Path $outDir "drive-removable.ico")))
-          Write-Host ([IconTool]::ExportStock(11, (Join-Path $outDir "drive-cd.ico")))
-          Write-Host ([IconTool]::ExportStock(9,  (Join-Path $outDir "drive-network.ico")))
+          # Normal drive icon (logo chhara) + extras
+          Try-Stock 8  "drive-normal.ico"
+          Try-Stock 7  "drive-removable.ico"
+          Try-Stock 11 "drive-cd.ico"
+          Try-Stock 9  "drive-network.ico"
 
           Get-ChildItem $outDir | Format-Table Name, Length
 
