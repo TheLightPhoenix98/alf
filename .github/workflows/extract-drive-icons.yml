@@ -1,12 +1,10 @@
 name: Extract Windows Drive Icons
 
 on:
-  workflow_dispatch:          # ম্যানুয়ালি চালাবে
-  # schedule:
-  #   - cron: '0 0 1 * *'   # চাইলে মাসে একবার
+  workflow_dispatch:
 
 permissions:
-  contents: write             # কমিট করার জন্য দরকার
+  contents: write
 
 jobs:
   extract:
@@ -21,7 +19,10 @@ jobs:
           $outDir = "icons"
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-          Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+          # PowerShell 7+ এর জন্য System.Drawing.Common ব্যবহার করতে হবে
+          $refAsm = if ($PSVersionTable.PSVersion.Major -le 5) { 'System.Drawing' } else { 'System.Drawing.Common' }
+
+          Add-Type -ReferencedAssemblies $refAsm -TypeDefinition @"
           using System;
           using System.Drawing;
           using System.Runtime.InteropServices;
@@ -47,7 +48,6 @@ jobs:
               public const uint SHGSI_LARGEICON  = 0x000000000;
               public const uint SHGSI_SMALLICON  = 0x000000001;
 
-              // Official stock IDs
               public const uint SIID_DRIVEFIXED   = 8;   // Normal HDD / C: style
               public const uint SIID_DRIVEREMOVE  = 7;   // Removable / USB
               public const uint SIID_DRIVECD      = 11;  // Optical
@@ -67,17 +67,17 @@ jobs:
           }
           "@
 
-          # ---- Normal Fixed Drive (C: / HDD) ----
+          # Normal Fixed Drive (C: / HDD)
           $fixed = [StockIcon]::Get([StockIcon]::SIID_DRIVEFIXED, $true)
           $fixed.Save("$outDir\drive-fixed.ico")
           Write-Host "Saved: drive-fixed.ico"
 
-          # ---- Removable / USB style ----
+          # Removable / USB style
           $removable = [StockIcon]::Get([StockIcon]::SIID_DRIVEREMOVE, $true)
           $removable.Save("$outDir\drive-removable.ico")
           Write-Host "Saved: drive-removable.ico"
 
-          # ---- Extra useful ones (optional) ----
+          # Extra
           $cd = [StockIcon]::Get([StockIcon]::SIID_DRIVECD, $true)
           $cd.Save("$outDir\drive-cd.ico")
 
