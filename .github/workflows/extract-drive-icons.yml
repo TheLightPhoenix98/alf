@@ -16,7 +16,7 @@ jobs:
       - name: Extract drive icons
         shell: pwsh
         run: |
-          $outDir = "icons"
+          $outDir = Join-Path (Get-Location) "icons"
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
           # PowerShell 7+ এর জন্য System.Drawing.Common ব্যবহার করতে হবে
@@ -67,27 +67,28 @@ jobs:
           }
           "@
 
+          # Icon.Save() এর জন্য Stream লাগে, string path নয়
+          function Save-Icon($icon, $path) {
+              $fs = [System.IO.File]::Create($path)
+              try { $icon.Save($fs) } finally { $fs.Dispose() }
+              Write-Host "Saved: $path"
+          }
+
           # Normal Fixed Drive (C: / HDD)
-          $fixed = [StockIcon]::Get([StockIcon]::SIID_DRIVEFIXED, $true)
-          $fixed.Save("$outDir\drive-fixed.ico")
-          Write-Host "Saved: drive-fixed.ico"
+          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVEFIXED, $true)) (Join-Path $outDir "drive-fixed.ico")
 
           # Removable / USB style
-          $removable = [StockIcon]::Get([StockIcon]::SIID_DRIVEREMOVE, $true)
-          $removable.Save("$outDir\drive-removable.ico")
-          Write-Host "Saved: drive-removable.ico"
+          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVEREMOVE, $true)) (Join-Path $outDir "drive-removable.ico")
 
           # Extra
-          $cd = [StockIcon]::Get([StockIcon]::SIID_DRIVECD, $true)
-          $cd.Save("$outDir\drive-cd.ico")
+          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVECD, $true)) (Join-Path $outDir "drive-cd.ico")
+          Save-Icon ([StockIcon]::Get([StockIcon]::SIID_DRIVENET, $true)) (Join-Path $outDir "drive-network.ico")
 
-          $net = [StockIcon]::Get([StockIcon]::SIID_DRIVENET, $true)
-          $net.Save("$outDir\drive-network.ico")
-
-          Write-Host "`nAll icons extracted to $outDir\"
+          Write-Host "`nAll icons extracted to $outDir"
           Get-ChildItem $outDir | Format-Table Name, Length
 
       - name: Commit & Push
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
