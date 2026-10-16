@@ -1,0 +1,77 @@
+name: gta-sa-wizard
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download + extract
+        run: |
+          pip install gdown
+          gdown "1_qYPgoYbkdBE-B1SfW8orgUXGDz0Otuv" -O file.rar
+          7z x file.rar -oiso_dir -y
+          Remove-Item file.rar
+          $iso = Get-ChildItem iso_dir -Recurse -Filter *.iso | Select-Object -First 1
+          7z x $iso.FullName -odisc -y
+          Remove-Item iso_dir -Recurse -Force
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Record + run wizard
+        shell: pwsh
+        run: |
+          $rec = Start-Process ffmpeg -PassThru -WindowStyle Hidden -ArgumentList `
+            "-y","-f","gdigrab","-framerate","2","-i","desktop","-c:v","libx264","-preset","ultrafast","-crf","32","-pix_fmt","yuv420p","$PWD\rec.mkv"
+          Start-Sleep 3
+          $setup = Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc" -PassThru
+          $sh = New-Object -ComObject WScript.Shell
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep 5
+            $p = Get-Process | Where-Object {
+              $_.MainWindowTitle -and ($_.Name -match 'setup|ISBEW|Install|IDriver|GTA')
+            } | Select-Object -First 1
+            if ($p) {
+              Write-Host "[$i] window: $($p.MainWindowTitle)"
+              [void]$sh.AppActivate($p.Id)
+              $sh.SendKeys("{ENTER}")
+            }
+            $exe = Get-ChildItem "C:\Program Files*" -Recurse -Filter gta_sa.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($exe -and -not $p) { break }
+          }
+          Get-Process | Where-Object { $_.Name -match 'setup|ISBEW|gta_sa' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep 3
+          Stop-Process -Id $rec.Id -Force
+          if ($exe) { $exe.DirectoryName | Out-File gamedir.txt } else { Write-Host "gta_sa.exe পাওয়া যায়নি" }
+
+      - name: Recording save
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wizard-recording
+          path: rec.mkv
+
+      - name: Tree + Zip
+        run: |
+          $dir = (Get-Content gamedir.txt).Trim()
+          Write-Host "GAME DIR: $dir"
+          Get-ChildItem $dir | Select Name
+          7z a -tzip -mx=1 GTA_SA.zip "$dir\*"
+
+      - name: Temporary link
+        run: |
+          mkdir serve; move GTA_SA.zip serve\
+          curl.exe -sL -o cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+          Start-Process python -ArgumentList "-m","http.server","8000" -WorkingDirectory serve
+          Start-Process .\cloudflared.exe -ArgumentList "tunnel","--url","http://localhost:8000" -RedirectStandardError tunnel.log
+          Start-Sleep 15
+          $u = (Select-String -Path tunnel.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
+          Write-Host "=========================="
+          Write-Host "LINK: $u/GTA_SA.zip"
+          Write-Host "=========================="
+          Start-Sleep 3600
