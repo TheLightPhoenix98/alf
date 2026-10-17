@@ -1,10 +1,9 @@
-name: gta-sa-install
+name: installer-screenshots
 on: workflow_dispatch
 
 jobs:
-  build:
+  shots:
     runs-on: windows-latest
-    timeout-minutes: 120
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -20,75 +19,43 @@ jobs:
           7z x $iso.FullName -odisc -y
           Remove-Item iso_dir -Recurse -Force
 
-      - name: Install (auto click)
+      - name: Click through + screenshots
         run: |
           Add-Type -AssemblyName System.Windows.Forms,System.Drawing
           New-Item -ItemType Directory shots | Out-Null
           $script:n = 0
           function Shot {
-            $script:n++
             $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
             $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
-            $bmp.Save("$PWD\shots\shot_$('{0:D3}' -f $script:n).png")
+            $bmp.Save("$PWD\shots\shot_$('{0:D2}' -f $script:n).png")
             $g.Dispose(); $bmp.Dispose()
+            $script:n++
           }
-          function Key($k) { [System.Windows.Forms.SendKeys]::SendWait($k); Start-Sleep 2 }
-          function InstSize {
-            $t = 0
-            foreach ($r in @("C:\Program Files (x86)\Rockstar Games","C:\Program Files\Rockstar Games","C:\GTA_SA")) {
-              if (Test-Path $r) {
-                $t += (Get-ChildItem $r -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-              }
-            }
-            return [long]$t
-          }
-
-          $p = Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc" -PassThru
-          Start-Sleep 6
-          Key "{ENTER}"      # Language OK
-          Start-Sleep 3
-          Key "{ENTER}"      # Splash Next
-          Key "{ENTER}"      # Welcome Next
-          Shot
-          Key "{UP}"         # I accept
-          Shot
-          Key "{ENTER}"      # License Next
-          Shot
-
-          # বাকি পেজ: ফাইল কপি চলাকালীন Enter চাপবে না, থেমে গেলে চাপবে
-          $last = -1
-          $deadline = (Get-Date).AddMinutes(40)
-          while ((Get-Date) -lt $deadline) {
-            if (-not (Get-Process -Name setup,Install,ISBEW64 -ErrorAction SilentlyContinue)) { break }
-            $s = InstSize
+          function Key($k) {
+            [System.Windows.Forms.SendKeys]::SendWait($k)
+            Start-Sleep 2
             Shot
-            if ($s -eq $last) {
-              [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-            }
-            $last = $s
-            Start-Sleep 10
           }
-          Shot
+
+          Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc"
+          Start-Sleep 5
+          Shot                  # 00: Language পেজ
+          Key "{ENTER}"         # 01: Language OK -> Splash
+          Key "{ENTER}"         # 02: Splash Next -> Welcome
+          Key "{ENTER}"         # 03: Welcome Next -> License
+          Key "{UP}"            # 04: "I accept" সিলেক্ট
+          Key "{ENTER}"         # 05: License Next -> পরের পেজ
+          Key "{ENTER}"         # 06
+          Key "{ENTER}"         # 07
+          Key "{ENTER}"         # 08
+          Start-Sleep 5
+          Shot                  # 09
           Get-Process | Where-Object { $_.MainWindowTitle } | Select ProcessName, MainWindowTitle
-          "Installed size: $(InstSize) bytes"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: shots
           path: shots/
-
-      - name: Find game folder + Tree
-        run: |
-          $exe = Get-ChildItem "C:\Program Files (x86)","C:\Program Files","C:\GTA_SA" -Recurse -Filter gta_sa.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) { throw "gta_sa.exe পাওয়া যায়নি, shots আর্টিফ্যাক্ট দেখুন" }
-          $dir = $exe.DirectoryName
-          "GAME_DIR=$dir" | Out-File -Append $env:GITHUB_ENV
-          Get-ChildItem $dir | Select Name, Length
-
-      - name: Zip
-        run: |
-          7z a -tzip -mx=1 GTA_SA.zip "$env:GAME_DIR\*"
-          (Get-Item GTA_SA.zip).Length / 1GB
