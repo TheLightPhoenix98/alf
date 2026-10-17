@@ -41,17 +41,23 @@ jobs:
 
           Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc"
           Start-Sleep 5
-          Shot                  # 00: Language পেজ
-          Key "{ENTER}"         # 01: Language OK -> Splash
-          Key "{ENTER}"         # 02: Splash Next -> Welcome
-          Key "{ENTER}"         # 03: Welcome Next -> License
-          Key "{UP}"            # 04: "I accept" সিলেক্ট
-          Key "{ENTER}"         # 05: License Next -> পরের পেজ
-          Key "{ENTER}"         # 06
-          Key "{ENTER}"         # 07
-          Key "{ENTER}"         # 08
-          Start-Sleep 5
-          Shot                  # 09
+          Shot                  # 00 Language
+          Key "{ENTER}"         # 01 -> Splash
+          Key "{ENTER}"         # 02 -> Welcome
+          Key "{ENTER}"         # 03 -> License
+          Key "{UP}"            # 04 accept
+          Key "{ENTER}"         # 05 -> System Requirement
+          Key "{ENTER}"         # 06 -> Setup Type
+          Key "{ENTER}"         # 07 -> Destination
+          Key "{ENTER}"         # 08 -> Register প্রশ্ন
+          Key "n"               # 09 -> No
+          Key "{ENTER}"         # 10 -> Destination এ Next
+
+          # এরপর ১২টা শট, ১০ সেকেন্ড পরপর
+          for ($i = 0; $i -lt 12; $i++) {
+            Start-Sleep 10
+            Shot
+          }
           Get-Process | Where-Object { $_.MainWindowTitle } | Select ProcessName, MainWindowTitle
 
       - uses: actions/upload-artifact@v4
