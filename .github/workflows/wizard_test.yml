@@ -50,14 +50,23 @@ jobs:
           Key "{ENTER}"         # 06 -> Setup Type
           Key "{ENTER}"         # 07 -> Destination
           Key "{ENTER}"         # 08 -> Register প্রশ্ন
-          Key "n"               # 09 -> No
-          Key "{ENTER}"         # 10 -> Destination এ Next
+          Key "n"               # 09 Register: No -> Shortcut প্রশ্ন
+          Key "y"               # 10 Shortcut: Yes -> Start Copying Files
+          Key "{ENTER}"         # 11 -> কপি শুরু
 
-          # এরপর ১২টা শট, ১০ সেকেন্ড পরপর
-          for ($i = 0; $i -lt 12; $i++) {
-            Start-Sleep 10
+          # ৬ মিনিট (২৪ x ১৫ সেকেন্ড)
+          $dir = "C:\Program Files (x86)\Rockstar Games\GTA San Andreas"
+          for ($i = 0; $i -lt 24; $i++) {
+            Start-Sleep 15
             Shot
+            if (Test-Path $dir) {
+              $size = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+              Write-Host "size: $size"
+              if ($size -gt 4900000000) { break }
+            }
           }
+          Start-Sleep 5
+          Shot
           Get-Process | Where-Object { $_.MainWindowTitle } | Select ProcessName, MainWindowTitle
 
       - uses: actions/upload-artifact@v4
