@@ -1,10 +1,9 @@
-name: gta-sa-wizard
+name: installer-screenshots
 on: workflow_dispatch
 
 jobs:
-  build:
+  shots:
     runs-on: windows-latest
-    timeout-minutes: 120
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -20,58 +19,24 @@ jobs:
           7z x $iso.FullName -odisc -y
           Remove-Item iso_dir -Recurse -Force
 
-      - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
-
-      - name: Record + run wizard
-        shell: pwsh
+      - name: Open installer + screenshots
         run: |
-          $rec = Start-Process ffmpeg -PassThru -WindowStyle Hidden -ArgumentList `
-            "-y","-f","gdigrab","-framerate","2","-i","desktop","-c:v","libx264","-preset","ultrafast","-crf","32","-pix_fmt","yuv420p","$PWD\rec.mkv"
-          Start-Sleep 3
-          $setup = Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc" -PassThru
-          $sh = New-Object -ComObject WScript.Shell
-          for ($i = 0; $i -lt 90; $i++) {
-            Start-Sleep 5
-            $p = Get-Process | Where-Object {
-              $_.MainWindowTitle -and ($_.Name -match 'setup|ISBEW|Install|IDriver|GTA')
-            } | Select-Object -First 1
-            if ($p) {
-              Write-Host "[$i] window: $($p.MainWindowTitle)"
-              [void]$sh.AppActivate($p.Id)
-              $sh.SendKeys("{ENTER}")
-            }
-            $exe = Get-ChildItem "C:\Program Files*" -Recurse -Filter gta_sa.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($exe -and -not $p) { break }
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          New-Item -ItemType Directory shots | Out-Null
+          Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc"
+          for ($i = 1; $i -le 25; $i++) {
+            Start-Sleep 3
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+            $bmp.Save("$PWD\shots\shot_$('{0:D2}' -f $i).png")
+            $g.Dispose(); $bmp.Dispose()
           }
-          Get-Process | Where-Object { $_.Name -match 'setup|ISBEW|gta_sa' } | Stop-Process -Force -ErrorAction SilentlyContinue
-          Start-Sleep 3
-          Stop-Process -Id $rec.Id -Force
-          if ($exe) { $exe.DirectoryName | Out-File gamedir.txt } else { Write-Host "gta_sa.exe পাওয়া যায়নি" }
+          Get-Process | Where-Object { $_.MainWindowTitle } | Select ProcessName, MainWindowTitle
 
-      - name: Recording save
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: wizard-recording
-          path: rec.mkv
-
-      - name: Tree + Zip
-        run: |
-          $dir = (Get-Content gamedir.txt).Trim()
-          Write-Host "GAME DIR: $dir"
-          Get-ChildItem $dir | Select Name
-          7z a -tzip -mx=1 GTA_SA.zip "$dir\*"
-
-      - name: Temporary link
-        run: |
-          mkdir serve; move GTA_SA.zip serve\
-          curl.exe -sL -o cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
-          Start-Process python -ArgumentList "-m","http.server","8000" -WorkingDirectory serve
-          Start-Process .\cloudflared.exe -ArgumentList "tunnel","--url","http://localhost:8000" -RedirectStandardError tunnel.log
-          Start-Sleep 15
-          $u = (Select-String -Path tunnel.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
-          Write-Host "=========================="
-          Write-Host "LINK: $u/GTA_SA.zip"
-          Write-Host "=========================="
-          Start-Sleep 3600
+          name: shots
+          path: shots/
