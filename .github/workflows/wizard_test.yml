@@ -92,16 +92,3 @@ jobs:
         run: |
           7z a -tzip -mx=1 GTA_SA.zip "$env:GAME_DIR\*"
           (Get-Item GTA_SA.zip).Length / 1GB
-
-      - name: Temporary link
-        run: |
-          mkdir serve; move GTA_SA.zip serve\
-          curl.exe -sL -o cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
-          Start-Process python -ArgumentList "-m","http.server","8000" -WorkingDirectory "$PWD\serve"
-          Start-Process .\cloudflared.exe -ArgumentList "tunnel","--url","http://localhost:8000" -RedirectStandardError tunnel.log
-          Start-Sleep 15
-          $u = (Select-String -Path tunnel.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
-          Write-Host "=========================="
-          Write-Host "LINK: $u/GTA_SA.zip"
-          Write-Host "=========================="
-          Start-Sleep 3600
