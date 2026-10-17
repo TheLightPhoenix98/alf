@@ -1,9 +1,10 @@
-name: installer-screenshots
+name: gta-sa-install
 on: workflow_dispatch
 
 jobs:
-  shots:
+  build:
     runs-on: windows-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -19,30 +20,88 @@ jobs:
           7z x $iso.FullName -odisc -y
           Remove-Item iso_dir -Recurse -Force
 
-      - name: Click through + screenshots
+      - name: Install (auto click)
         run: |
           Add-Type -AssemblyName System.Windows.Forms,System.Drawing
           New-Item -ItemType Directory shots | Out-Null
-          function Shot($n) {
+          $script:n = 0
+          function Shot {
+            $script:n++
             $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
             $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
-            $bmp.Save("$PWD\shots\shot_$('{0:D2}' -f $n).png")
+            $bmp.Save("$PWD\shots\shot_$('{0:D3}' -f $script:n).png")
             $g.Dispose(); $bmp.Dispose()
           }
-          Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc"
-          Start-Sleep 5
-          Shot 0
-          for ($i = 1; $i -le 12; $i++) {
-            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-            Start-Sleep 2
-            Shot $i
+          function Key($k) { [System.Windows.Forms.SendKeys]::SendWait($k); Start-Sleep 2 }
+          function InstSize {
+            $t = 0
+            foreach ($r in @("C:\Program Files (x86)\Rockstar Games","C:\Program Files\Rockstar Games","C:\GTA_SA")) {
+              if (Test-Path $r) {
+                $t += (Get-ChildItem $r -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+              }
+            }
+            return [long]$t
           }
+
+          $p = Start-Process "$PWD\disc\setup.exe" -WorkingDirectory "$PWD\disc" -PassThru
+          Start-Sleep 6
+          Key "{ENTER}"      # Language OK
+          Start-Sleep 3
+          Key "{ENTER}"      # Splash Next
+          Key "{ENTER}"      # Welcome Next
+          Shot
+          Key "{UP}"         # I accept
+          Shot
+          Key "{ENTER}"      # License Next
+          Shot
+
+          # বাকি পেজ: ফাইল কপি চলাকালীন Enter চাপবে না, থেমে গেলে চাপবে
+          $last = -1
+          $deadline = (Get-Date).AddMinutes(40)
+          while ((Get-Date) -lt $deadline) {
+            if (-not (Get-Process -Name setup,Install,ISBEW64 -ErrorAction SilentlyContinue)) { break }
+            $s = InstSize
+            Shot
+            if ($s -eq $last) {
+              [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+            }
+            $last = $s
+            Start-Sleep 10
+          }
+          Shot
           Get-Process | Where-Object { $_.MainWindowTitle } | Select ProcessName, MainWindowTitle
+          "Installed size: $(InstSize) bytes"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: shots
           path: shots/
+
+      - name: Find game folder + Tree
+        run: |
+          $exe = Get-ChildItem "C:\Program Files (x86)","C:\Program Files","C:\GTA_SA" -Recurse -Filter gta_sa.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "gta_sa.exe পাওয়া যায়নি, shots আর্টিফ্যাক্ট দেখুন" }
+          $dir = $exe.DirectoryName
+          "GAME_DIR=$dir" | Out-File -Append $env:GITHUB_ENV
+          Get-ChildItem $dir | Select Name, Length
+
+      - name: Zip
+        run: |
+          7z a -tzip -mx=1 GTA_SA.zip "$env:GAME_DIR\*"
+          (Get-Item GTA_SA.zip).Length / 1GB
+
+      - name: Temporary link
+        run: |
+          mkdir serve; move GTA_SA.zip serve\
+          curl.exe -sL -o cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+          Start-Process python -ArgumentList "-m","http.server","8000" -WorkingDirectory "$PWD\serve"
+          Start-Process .\cloudflared.exe -ArgumentList "tunnel","--url","http://localhost:8000" -RedirectStandardError tunnel.log
+          Start-Sleep 15
+          $u = (Select-String -Path tunnel.log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com').Matches[0].Value
+          Write-Host "=========================="
+          Write-Host "LINK: $u/GTA_SA.zip"
+          Write-Host "=========================="
+          Start-Sleep 3600
