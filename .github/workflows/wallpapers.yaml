@@ -1,0 +1,15 @@
+name: Download Wallpapers
+on: workflow_dispatch
+
+jobs:
+  grab:
+    runs-on: windows-latest
+    steps:
+      - name: Upload wallpapers
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-wallpapers
+          path: |
+            C:\Windows\Web\Wallpaper\**
+            C:\Windows\Web\4K\Wallpaper\**
+          if-no-files-found: warn
