@@ -1,0 +1,59 @@
+name: Convert to Bedrock
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to upload to
+        required: true
+
+env:
+  WORLD_URL: ${{ vars.WORLD_URL }}   # Java world zip এর direct link
+  BEDROCK_FORMAT: BEDROCK_1_20_80    # `-f ?` দিয়ে সাপোর্টেড লিস্ট দেখুন
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Download Chunker CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo HiveGamesOSS/Chunker \
+            --pattern 'chunker-cli-*.jar' --output chunker-cli.jar
+
+      - name: Download Java world
+        run: |
+          curl -fsSL "$WORLD_URL" -o world.zip
+          mkdir java_world
+          unzip -q world.zip -d java_world
+          # zip এর ভেতরে যদি একটা সাবফোল্ডার থাকে, level.dat যেখানে আছে সেটাই input
+          WORLD_DIR=$(dirname "$(find java_world -name level.dat | head -n1)")
+          echo "WORLD_DIR=$WORLD_DIR" >> "$GITHUB_ENV"
+
+      - name: Convert
+        run: |
+          java -Xmx6G -jar chunker-cli.jar \
+            -i "$WORLD_DIR" -f "$BEDROCK_FORMAT" -o bedrock_out
+
+      - name: Package as .mcworld
+        run: |
+          cd bedrock_out
+          zip -qr ../UncensoredLibrary-Bedrock.mcworld .
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" UncensoredLibrary-Bedrock.mcworld --clobber
