@@ -10,8 +10,8 @@ on:
         required: true
 
 env:
-  WORLD_URL: ${{ vars.WORLD_URL }}   # Java world zip এর direct link
-  BEDROCK_FORMAT: BEDROCK_1_20_80    # `-f ?` দিয়ে সাপোর্টেড লিস্ট দেখুন
+  GDRIVE_ID: 186nlhNsT-6BERjD73h7bI-0TQtutkSgB
+  BEDROCK_FORMAT: BEDROCK_1_20_80   # `-f ?` দিয়ে সাপোর্টেড লিস্ট দেখুন
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
 permissions:
@@ -33,14 +33,16 @@ jobs:
           gh release download --repo HiveGamesOSS/Chunker \
             --pattern 'chunker-cli-*.jar' --output chunker-cli.jar
 
-      - name: Download Java world
+      - name: Download Java world from Drive
         run: |
-          curl -fsSL "$WORLD_URL" -o world.zip
+          pip install gdown
+          gdown "$GDRIVE_ID" -O world.zip
+          file world.zip
           mkdir java_world
           unzip -q world.zip -d java_world
-          # zip এর ভেতরে যদি একটা সাবফোল্ডার থাকে, level.dat যেখানে আছে সেটাই input
-          WORLD_DIR=$(dirname "$(find java_world -name level.dat | head -n1)")
-          echo "WORLD_DIR=$WORLD_DIR" >> "$GITHUB_ENV"
+          LEVEL=$(find java_world -name level.dat | head -n1)
+          test -n "$LEVEL" || { echo "level.dat not found"; exit 1; }
+          echo "WORLD_DIR=$(dirname "$LEVEL")" >> "$GITHUB_ENV"
 
       - name: Convert
         run: |
