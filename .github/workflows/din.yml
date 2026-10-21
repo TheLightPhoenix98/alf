@@ -1,0 +1,200 @@
+name: Record Dino Demo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  record:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        shell: pwsh
+        run: |
+          choco install ffmpeg lively -y --no-progress
+          choco install translucenttb -y --no-progress
+          pip install pyautogui
+
+      - name: Set resolution 1920x1080
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public class Res {
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+            public struct DEVMODE {
+              [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+              public short dmSpecVersion; public short dmDriverVersion;
+              public short dmSize; public short dmDriverExtra;
+              public int dmFields;
+              public int dmPositionX; public int dmPositionY;
+              public int dmDisplayOrientation; public int dmDisplayFixedOutput;
+              public short dmColor; public short dmDuplex; public short dmYResolution;
+              public short dmTTOption; public short dmCollate;
+              [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+              public short dmLogPixels;
+              public int dmBitsPerPel; public int dmPelsWidth; public int dmPelsHeight;
+              public int dmDisplayFlags; public int dmDisplayFrequency;
+              public int dmICMMethod; public int dmICMIntent; public int dmMediaType;
+              public int dmDitherType; public int dmReserved1; public int dmReserved2;
+              public int dmPanningWidth; public int dmPanningHeight;
+            }
+            [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+            public static extern bool EnumDisplaySettings(string name, int mode, ref DEVMODE dm);
+            [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+            public static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+            public static int Set(int w, int h) {
+              DEVMODE dm = new DEVMODE();
+              dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+              EnumDisplaySettings(null, -1, ref dm);
+              dm.dmPelsWidth = w;
+              dm.dmPelsHeight = h;
+              dm.dmFields = 0x80000 | 0x100000;
+              return ChangeDisplaySettings(ref dm, 0);
+            }
+          }
+          '@
+          $r = [Res]::Set(1920, 1080)
+          if ($r -ne 0) { throw "ChangeDisplaySettings failed with code $r" }
+          Start-Sleep -Seconds 3
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+      - name: Start TranslucentTB
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:ProgramData `
+            -Recurse -Filter 'TranslucentTB.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($exe) {
+            Start-Process $exe.FullName
+            Start-Sleep -Seconds 3
+          } else {
+            Write-Warning 'TranslucentTB.exe not found'
+          }
+
+      - name: Set static wallpaper
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System.Runtime.InteropServices;
+          public class Wall {
+            [DllImport("user32.dll", CharSet = CharSet.Auto)]
+            public static extern int SystemParametersInfo(int a, int b, string c, int d);
+          }
+          '@
+          Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10'
+          Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0'
+          [Wall]::SystemParametersInfo(20, 0, "$env:GITHUB_WORKSPACE\iftkhr.png", 3) | Out-Null
+
+          $lively = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA `
+            -Recurse -Filter 'Lively.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          $cu = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA `
+            -Recurse -Filter 'livelycu.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $lively -or -not $cu) { throw 'Lively not found' }
+          "LIVELY_EXE=$($lively.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "LIVELY_CU=$($cu.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Start-Process $lively.FullName
+          Start-Sleep -Seconds 8
+
+      - name: Record
+        shell: pwsh
+        run: |
+          $py = @'
+          import random
+          import time
+          import pyautogui
+
+          pyautogui.FAILSAFE = False
+          pyautogui.PAUSE = 0
+
+          GOD_MODE = "Runner.prototype.gameOver = function(){};"
+          SET_SCORE = "Runner.instance_.distanceRan = 99950 / 0.025;"
+
+          def pause(a, b):
+              time.sleep(random.uniform(a, b))
+
+          def move(x, y):
+              x += random.randint(-8, 8)
+              y += random.randint(-8, 8)
+              pyautogui.moveTo(x, y, duration=random.uniform(0.6, 1.2), tween=pyautogui.easeInOutQuad)
+
+          def click(x, y):
+              move(x, y)
+              pause(0.15, 0.35)
+              pyautogui.click()
+
+          def type_human(text):
+              for ch in text:
+                  pyautogui.write(ch)
+                  time.sleep(random.uniform(0.05, 0.17))
+                  if random.random() < 0.07:
+                      time.sleep(random.uniform(0.2, 0.45))
+
+          w, h = pyautogui.size()
+
+          pause(4.0, 5.0)
+          move(int(w * 0.3), int(h * 0.45))
+          pause(1.2, 2.0)
+
+          pyautogui.hotkey("ctrl", "shift", "j")
+          pause(2.0, 3.0)
+
+          type_human(GOD_MODE)
+          pause(0.5, 1.0)
+          pyautogui.press("enter")
+          pause(1.0, 1.8)
+
+          click(int(w * 0.25), int(h * 0.5))
+          pause(0.6, 1.2)
+          pyautogui.press("space")
+
+          pause(5.0, 7.0)
+
+          pyautogui.hotkey("ctrl", "shift", "j")
+          pause(1.2, 2.0)
+          type_human(SET_SCORE)
+          pause(0.5, 1.0)
+          pyautogui.press("enter")
+
+          pause(8.0, 10.0)
+          '@
+          Set-Content -Path "$env:RUNNER_TEMP\demo.py" -Value $py -Encoding utf8
+
+          $out = Join-Path $env:GITHUB_WORKSPACE 'recording.mp4'
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = 'ffmpeg'
+          $psi.Arguments = "-y -f gdigrab -framerate 30 -draw_mouse 1 -i desktop -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p `"$out`""
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardInput = $true
+          $ff = [System.Diagnostics.Process]::Start($psi)
+
+          while (-not (Test-Path $out)) { Start-Sleep -Milliseconds 20 }
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          while ($sw.ElapsedMilliseconds -lt 4560) { Start-Sleep -Milliseconds 5 }
+
+          & $env:LIVELY_CU setwp --file "$env:GITHUB_WORKSPACE\black_hole.mp4"
+          Start-Sleep -Seconds 4
+
+          $chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
+          Start-Process $chrome -ArgumentList @(
+            '--start-maximized',
+            '--no-first-run',
+            '--no-default-browser-check',
+            "--user-data-dir=$env:RUNNER_TEMP\chrome-profile",
+            'chrome://dino'
+          )
+
+          python "$env:RUNNER_TEMP\demo.py"
+
+          $ff.StandardInput.WriteLine('q')
+          $ff.StandardInput.Flush()
+          $ff.WaitForExit(20000) | Out-Null
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recording
+          path: recording.mp4
