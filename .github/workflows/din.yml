@@ -66,13 +66,12 @@ jobs:
       - name: Start TranslucentTB
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:ProgramData `
-            -Recurse -Filter 'TranslucentTB.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($exe) {
-            Start-Process $exe.FullName
+          $pkg = Get-AppxPackage -Name '*TranslucentTB*' | Select-Object -First 1
+          if ($pkg) {
+            Start-Process "shell:AppsFolder\$($pkg.PackageFamilyName)!App"
             Start-Sleep -Seconds 3
           } else {
-            Write-Warning 'TranslucentTB.exe not found'
+            Write-Warning 'TranslucentTB package not found'
           }
 
       - name: Set static wallpaper
@@ -89,11 +88,20 @@ jobs:
           Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0'
           [Wall]::SystemParametersInfo(20, 0, "$env:GITHUB_WORKSPACE\iftkhr.png", 3) | Out-Null
 
-          $lively = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA `
-            -Recurse -Filter 'Lively.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          $cu = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA `
-            -Recurse -Filter 'livelycu.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $lively -or -not $cu) { throw 'Lively not found' }
+          $dirs = @(
+            "$env:ProgramFiles\Lively Wallpaper",
+            "${env:ProgramFiles(x86)}\Lively Wallpaper",
+            "$env:LOCALAPPDATA\Programs\Lively Wallpaper"
+          ) | Where-Object { Test-Path $_ }
+          $exes = $dirs | ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue }
+          $exes | ForEach-Object { Write-Host $_.FullName }
+          $lively = $exes | Where-Object { $_.Name -ieq 'Lively.exe' } | Select-Object -First 1
+          $cu = $exes | Where-Object { $_.Name -match 'livelycu|CommandUtility' } | Select-Object -First 1
+          if (-not $cu) {
+            $cmd = Get-Command livelycu -ErrorAction SilentlyContinue
+            if ($cmd) { $cu = Get-Item $cmd.Source }
+          }
+          if (-not $lively -or -not $cu) { throw 'Lively executables not found, see listing above' }
           "LIVELY_EXE=$($lively.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "LIVELY_CU=$($cu.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Start-Process $lively.FullName
