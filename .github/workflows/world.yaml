@@ -1,21 +1,14 @@
 name: Convert to Bedrock
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag to upload to
-        required: true
 
 env:
   GDRIVE_ID: 186nlhNsT-6BERjD73h7bI-0TQtutkSgB
-  BEDROCK_FORMAT: BEDROCK_1_20_80   # `-f ?` দিয়ে সাপোর্টেড লিস্ট দেখুন
-  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  BEDROCK_FORMAT: BEDROCK_1_20_80  
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   convert:
@@ -54,9 +47,10 @@ jobs:
           cd bedrock_out
           zip -qr ../UncensoredLibrary-Bedrock.mcworld .
 
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release upload "$TAG" UncensoredLibrary-Bedrock.mcworld --clobber
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UncensoredLibrary-Bedrock
+          path: UncensoredLibrary-Bedrock.mcworld
+          compression-level: 0
+          if-no-files-found: error
