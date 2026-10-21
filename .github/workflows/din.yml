@@ -66,12 +66,16 @@ jobs:
       - name: Start TranslucentTB
         shell: pwsh
         run: |
-          $pkg = Get-AppxPackage -Name '*TranslucentTB*' | Select-Object -First 1
-          if ($pkg) {
-            Start-Process "shell:AppsFolder\$($pkg.PackageFamilyName)!App"
-            Start-Sleep -Seconds 3
-          } else {
-            Write-Warning 'TranslucentTB package not found'
+          try {
+            $pkg = Get-AppxPackage -Name '*TranslucentTB*' | Select-Object -First 1
+            if (-not $pkg) { throw 'TranslucentTB package not found' }
+            $appId = (Get-AppxPackageManifest $pkg).Package.Applications.Application.Id | Select-Object -First 1
+            Write-Host "Launching $($pkg.PackageFamilyName)!$appId"
+            Start-Process explorer.exe "shell:AppsFolder\$($pkg.PackageFamilyName)!$appId"
+            Start-Sleep -Seconds 4
+            Get-Process TranslucentTB -ErrorAction SilentlyContinue | Select-Object Name, Id
+          } catch {
+            Write-Warning "TranslucentTB launch failed: $_"
           }
 
       - name: Set static wallpaper
