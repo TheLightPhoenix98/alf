@@ -100,16 +100,12 @@ jobs:
           $exes = $dirs | ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue }
           $exes | ForEach-Object { Write-Host $_.FullName }
           $lively = $exes | Where-Object { $_.Name -ieq 'Lively.exe' } | Select-Object -First 1
-          $cu = $exes | Where-Object { $_.Name -match 'livelycu|CommandUtility' } | Select-Object -First 1
-          if (-not $cu) {
-            $cmd = Get-Command livelycu -ErrorAction SilentlyContinue
-            if ($cmd) { $cu = Get-Item $cmd.Source }
-          }
-          if (-not $lively -or -not $cu) { throw 'Lively executables not found, see listing above' }
+          if (-not $lively) { throw 'Lively.exe not found, see listing above' }
           "LIVELY_EXE=$($lively.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "LIVELY_CU=$($cu.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           Start-Process $lively.FullName
           Start-Sleep -Seconds 8
+          Start-Process $lively.FullName -ArgumentList 'app','--showApp','false'
+          Start-Sleep -Seconds 2
 
       - name: Record
         shell: pwsh
@@ -187,7 +183,7 @@ jobs:
           $sw = [System.Diagnostics.Stopwatch]::StartNew()
           while ($sw.ElapsedMilliseconds -lt 4560) { Start-Sleep -Milliseconds 5 }
 
-          & $env:LIVELY_CU setwp --file "$env:GITHUB_WORKSPACE\black_hole.mp4"
+          Start-Process $env:LIVELY_EXE -ArgumentList 'setwp','--file',"`"$env:GITHUB_WORKSPACE\black_hole.mp4`""
           Start-Sleep -Seconds 4
 
           $chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
